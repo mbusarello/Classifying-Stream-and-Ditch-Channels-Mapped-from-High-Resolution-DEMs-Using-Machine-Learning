@@ -9,12 +9,6 @@ from sklearn.preprocessing import OneHotEncoder
 import joblib
 import argparse
 
-prediction_path = '/app/Mariana/Project2/models/find_best/'
-input_path = '/app/Mariana/Project2/dataset2/round2_new/sampled/'
-
-model_path = '' #fullpath to the joblib model
-
-
 def fitting(input_path,prediction_path,model_path):
     for inf_shapefile in os.listdir(input_path):
         if inf_shapefile.endswith('.shp'):
@@ -31,12 +25,15 @@ def fitting(input_path,prediction_path,model_path):
         
             X_pred = X_pred[['afs_min', 'afs_max', 'afs_mean', 'afs_median', 'aul_max', 'mul_median', 'facc_max', 'uds_min', 'uds_max', 'uds_median', 'sinuosity','class_dl']]
             
-            onehot = OneHotEncoder(sparse_output=False)
+            saved_objects = joblib.load(model_path)
+            model = saved_objects['model']
+            onehot = saved_objects['encoder']
+            
             encoded_unseen = onehot.transform(X_pred[['class_dl']])
             encoded_unseen_df = pd.DataFrame(encoded_unseen, columns=onehot.get_feature_names_out(['class_dl']))
             X_pred = pd.concat([X_pred, encoded_unseen_df], axis=1).drop('class_dl', axis=1)
             
-            model = joblib.load(model_path)
+            
             
             predictions = model.predict(X_pred)
             probability = model.predict_proba(X_pred)

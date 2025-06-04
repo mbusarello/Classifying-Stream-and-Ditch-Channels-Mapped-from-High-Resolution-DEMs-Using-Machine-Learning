@@ -14,9 +14,7 @@ import joblib
 from sklearn.utils.class_weight import compute_class_weight
 import argparse
 
-def train(buffer_path,output_path,split_size):
-
-    
+def train(buffer_path,output_path,split_size): 
     n=0
     for shapefile in os.listdir(buffer_path):
         if shapefile.endswith('.shp'):
@@ -46,8 +44,7 @@ def train(buffer_path,output_path,split_size):
     encoded = onehot.fit_transform(X[['class_dl']])
     encoded_df = pd.DataFrame(encoded, columns=onehot.get_feature_names_out(['class_dl']))
     X = pd.concat([X, encoded_df], axis=1).drop('class_dl', axis=1)
-    #categories = onehot.categories_
-    
+        
     y = data['id']
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -76,7 +73,7 @@ def train(buffer_path,output_path,split_size):
     
     savedata.to_csv(os.path.join(output_path,'eval_'+split_size+'m.csv'), sep=';', index=False)
     
-    joblib.dump(model, os.path.join(output_path,'model_'+split_size+'m.joblib'))
+    joblib.dump({'model': model, 'encoder': onehot}, os.path.join(output_path,'model_'+split_size+'m.joblib'))
     
 
 if __name__ == '__main__':   
