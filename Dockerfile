@@ -34,8 +34,7 @@ RUN pip install xgboost
 RUN pip install joblib
 RUN pip install argparse
 RUN pip install shapely
-RUN pip install skimage
-RUN pip install traceback
+RUN pip install scikit-image
 RUN pip install rasterstats
 RUN pip install rvt-py
 
