@@ -65,11 +65,34 @@ def start_and_end(base, tile_size, margin, limit, remainder):
 
 
 def unpatchify(shape, patches, tile_size, margin):
-    img_class = np.zeros(shape)
-    img_prob = np.zeros(shape)
-    height, width = shape
-    remain_height = height % tile_size
-    remain_width = width % tile_size
+    """
+    Reconstructs full-size prediction from patches.
+
+    Parameters
+    ----------
+    shape : tuple
+        (height, width, channels) if channel_last, otherwise (height, width).
+    patches : list of tuples
+        Each element is (patch_class, patch_prob), where:
+          - patch_class : (tile_size, tile_size) int array
+          - patch_prob  : (tile_size, tile_size, num_classes) float array
+    tile_size : int
+        Size of each patch.
+    margin : int
+        Overlap margin between patches.
+
+    Returns
+    -------
+    img_class : np.ndarray
+        (H, W) predicted class labels.
+    img_prob : np.ndarray
+        (H, W, num_classes) probability maps.
+    """
+    height, width = shape[:2]
+    num_classes = patches[0][1].shape[-1]
+
+    img_class = np.zeros((height, width), dtype=np.int32)
+    img_prob = np.zeros((height, width, num_classes), dtype=np.float32)
 
     dest_start_y = 0
     dest_start_x = 0
@@ -77,26 +100,37 @@ def unpatchify(shape, patches, tile_size, margin):
     for patch_class, patch_prob in patches:
         remain_width = width - dest_start_x
         remain_height = height - dest_start_y
-        src_start_y, src_end_y = start_and_end(dest_start_y, tile_size, margin,
-                                               height, remain_height)
-        src_start_x, src_end_x = start_and_end(dest_start_x, tile_size, margin,
-                                               width, remain_width)
+
+        src_start_y, src_end_y = start_and_end(
+            dest_start_y, tile_size, margin, height, remain_height
+        )
+        src_start_x, src_end_x = start_and_end(
+            dest_start_x, tile_size, margin, width, remain_width
+        )
+
         y_length = src_end_y - src_start_y
         x_length = src_end_x - src_start_x
 
 
-        img_class[dest_start_y:dest_start_y+y_length,
-                  dest_start_x:dest_start_x+x_length] = patch_class[src_start_y:src_end_y,
-                                                                    src_start_x:src_end_x]
-        img_prob[dest_start_y:dest_start_y+y_length,
-                 dest_start_x:dest_start_x+x_length] = patch_prob[src_start_y:src_end_y,
-                                                                  src_start_x:src_end_x]
+        img_class[
+            dest_start_y:dest_start_y + y_length,
+            dest_start_x:dest_start_x + x_length
+        ] = patch_class[src_start_y:src_end_y, src_start_x:src_end_x]
+
+
+        img_prob[
+            dest_start_y:dest_start_y + y_length,
+            dest_start_x:dest_start_x + x_length, :
+        ] = patch_prob[src_start_y:src_end_y, src_start_x:src_end_x, :]
+
+
         dest_start_x += x_length
         if dest_start_x >= width:
             dest_start_x = 0
             dest_start_y += y_length
 
-    return np.stack((img_class, img_prob), axis=-1)
+    return img_class, img_prob
+
 
 
 def read_input(bands, channel_last):
@@ -137,7 +171,8 @@ def main(img_path, model_path, out_path, model_type, band_wise, depth,
 
     for path in img_path:
         if not os.path.exists(path):
-            raise ValueError('Input path does not exist: {}'.format(path))
+            raise ValueError(f'Input path does not exist: {path}')
+
 
     if os.path.isdir(img_path[0]):
         imgs = []
@@ -150,29 +185,29 @@ def main(img_path, model_path, out_path, model_type, band_wise, depth,
 
 
     model_cls = utils.unet.MODELS[model_type]
-
     if model_cls.CHANNEL_LAST:
         input_shape = (tile_size, tile_size, len(imgs))
     else:
         input_shape = (len(imgs), tile_size, tile_size)
+
     model = model_cls(
-               input_shape, depth=depth,
-               classes=len(classes.split(',')),
-               entry_block=not band_wise,
-               weighting=utils.unet.SegmentationModelInterface.WEIGHTING.NONE)
+        input_shape,
+        depth=depth,
+        classes=len(classes.split(',')),
+        entry_block=not band_wise,
+        weighting=utils.unet.SegmentationModelInterface.WEIGHTING.NONE
+    )
     model.load_weights(model_path)
+
+    num_classes = len(classes.split(','))
+
 
     for bands in zip(*imgs):
         predicted = []
-
         img = read_input(bands, model.CHANNEL_LAST)
 
         do_patchify = tile_size < img.shape[0]
-
-        if do_patchify:
-            patches = patchify(img, tile_size, margin, model.CHANNEL_LAST)
-        else:
-            patches = [img]
+        patches = patchify(img, tile_size, margin, model.CHANNEL_LAST) if do_patchify else [img]
 
 
         for i in [8, 4, 2, 1]:
@@ -184,47 +219,44 @@ def main(img_path, model_path, out_path, model_type, band_wise, depth,
         for i in range(0, len(patches), batch_size):
             batch = np.array(patches[i:i+batch_size])
             batch = batch.reshape((batch_size, *input_shape))
-            out = model.proba(batch)
-            num_classes = len(classes.split(','))  # Assuming classes are passed as a string of comma-separated values
-            class_probabilities = [np.zeros_like(out[..., 0]) for _ in range(num_classes)]
-            
-            for output in out:
-                predicted_classes = np.argmax(output, axis=-1)
-                
-                
-                for class_idx in range(num_classes):
-                    class_probabilities[class_idx] = np.maximum(class_probabilities[class_idx], output[..., class_idx])
-            
-                    
-            #predicted.append((predicted_classes, class_probabilities))
-            predicted.append((predicted_classes, np.stack(class_probabilities, axis=-1)))
+            out = model.proba(batch)  # (B, tile, tile, C)
+
+            for b in range(batch.shape[0]):
+                output = out[b]  # (tile, tile, C)
+                predicted_classes = np.argmax(output, axis=-1)      # (tile, tile)
+                patch_prob = output                                 # (tile, tile, C)
+                predicted.append((predicted_classes, patch_prob))
 
 
         if do_patchify:
             if model.CHANNEL_LAST:
-                out = unpatchify(img.shape[:-1], predicted, tile_size, margin)
+                out_class, out_prob = unpatchify(img.shape, predicted, tile_size, margin)
             else:
-                out = unpatchify(img.shape[1:], predicted, tile_size, margin)
+                out_class, out_prob = unpatchify(img.shape[1:], predicted, tile_size, margin)
         else:
-            out = predicted[0]
+            out_class, out_prob = predicted[0]
 
 
         img_name = os.path.basename(bands[0]).split('.')[0]
         InutFileWithKnownExtent = gdal.Open(bands[0])
-        predicted_classes = out[0]
-        utils.WriteGeotiff.write_gtiff(predicted_classes, InutFileWithKnownExtent,
-                               os.path.join(out_path,
-                                            '{}_class.{}'.format(img_name,
-                                                                 img_type)))
+
+
+        utils.WriteGeotiff.write_gtiff(
+            out_class,
+            InutFileWithKnownExtent,
+            os.path.join(out_path, f"{img_name}_class.{img_type}")
+        )
 
 
         for class_idx in range(num_classes):
-            class_prob_map = out[1][class_idx]
+            class_prob_map = out_prob[..., class_idx]
             if class_prob_map.ndim > 2:
                 class_prob_map = class_prob_map.squeeze()
-            utils.WriteGeotiff.write_gtiff(class_prob_map, InutFileWithKnownExtent,
-                                           os.path.join(out_path,
-                                                        '{}_class_{}_prob.{}'.format(img_name, class_idx, img_type)))
+            utils.WriteGeotiff.write_gtiff(
+                class_prob_map,
+                InutFileWithKnownExtent,
+                os.path.join(out_path, f"{img_name}_class_{class_idx}_prob.{img_type}")
+            )
 
 
 if __name__ == '__main__':
