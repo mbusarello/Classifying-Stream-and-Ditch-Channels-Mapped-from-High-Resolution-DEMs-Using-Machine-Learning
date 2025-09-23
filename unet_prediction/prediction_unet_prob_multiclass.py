@@ -6,9 +6,9 @@ import tifffile
 from osgeo import gdal
 import utils.unet
 import utils.WriteGeotiff
-import tensorflow as tf
-tf.config.threading.set_intra_op_parallelism_threads(1)
-tf.config.threading.set_inter_op_parallelism_threads(1)
+#import tensorflow as tf
+#tf.config.threading.set_intra_op_parallelism_threads(1)
+#tf.config.threading.set_inter_op_parallelism_threads(1)
 
 
 def patchify_x(img, start_y, patches, tile_size, margin, width, channel_last):
