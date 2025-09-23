@@ -196,7 +196,9 @@ def main(img_path, model_path, out_path, model_type, band_wise, depth,
                     class_probabilities[class_idx] = np.maximum(class_probabilities[class_idx], output[..., class_idx])
             
                     
-            predicted.append((predicted_classes, class_probabilities))
+            #predicted.append((predicted_classes, class_probabilities))
+            predicted.append((predicted_classes, np.stack(class_probabilities, axis=-1)))
+
 
         if do_patchify:
             if model.CHANNEL_LAST:
