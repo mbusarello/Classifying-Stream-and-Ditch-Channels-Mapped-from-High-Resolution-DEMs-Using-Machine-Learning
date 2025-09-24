@@ -16,12 +16,12 @@ except:
     whitebox.download_wbt(linux_musl=True, reset=True)
     wbt = WhiteboxTools()
     
-def subtracting(DEM_path,inference_path,output_path):
-    for raster in os.listdir(inference_path):
+def subtracting(DEM_path,probability_maps_path,output_path):
+    for raster in os.listdir(probability_maps_path):
         if raster.endswith('.tif'):
             wbt.subtract(
                     input1=os.path.join(DEM_path,raster),
-                    input2=os.path.join(inference_path,raster),
+                    input2=os.path.join(probability_maps_path,raster),
                     output=os.path.join(output_path,raster)
                     )
             
